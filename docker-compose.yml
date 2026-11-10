@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: osint
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osint}
+      POSTGRES_DB: osint
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osint -d osint"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      HOST: 0.0.0.0
+      PORT: 4000
+      DATABASE_URL: postgresql://osint:${POSTGRES_PASSWORD:-osint}@db:5432/osint?schema=public
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@sentinel.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      MOCK_MODE: ${MOCK_MODE:-true}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-8000}
+      MAX_RETRIES: ${MAX_RETRIES:-2}
+      HIBP_API_KEY: ${HIBP_API_KEY:-}
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      ABSTRACT_API_KEY: ${ABSTRACT_API_KEY:-}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      IPINFO_API_KEY: ${IPINFO_API_KEY:-}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      SHODAN_API_KEY: ${SHODAN_API_KEY:-}
+      SEED_ON_BOOT: ${SEED_ON_BOOT:-true}
+    ports:
+      - "4000:4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  db-data:

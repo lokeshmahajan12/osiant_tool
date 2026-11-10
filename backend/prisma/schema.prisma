@@ -1,0 +1,410 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ANALYST
+  INVESTIGATOR
+  ADMIN
+  USER
+}
+
+/// Browser/OS permission categories tracked for consent-based monitoring.
+enum PermissionType {
+  LOCATION
+  CAMERA
+  MICROPHONE
+  NOTIFICATIONS
+}
+
+enum PermissionState {
+  NOT_REQUESTED
+  GRANTED
+  DENIED
+  REVOKED
+  UNAVAILABLE
+}
+
+enum CameraSessionStatus {
+  ACTIVE
+  ENDED
+}
+
+enum InputType {
+  EMAIL
+  PHONE
+  USERNAME
+  DOMAIN
+  IP
+}
+
+enum InvestigationStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WEB
+  OTHER
+}
+
+enum LocationSessionStatus {
+  ACTIVE
+  STOPPED
+}
+
+model User {
+  id               String             @id @default(cuid())
+  email            String             @unique
+  username         String?            @unique
+  mobile           String?            @unique
+  passwordHash     String
+  name             String
+  role             Role               @default(ANALYST)
+  isActive         Boolean            @default(true)
+  /// Optional end-user profile: country, state, city, bio etc.
+  country          String?
+  state            String?
+  city             String?
+  profile          Json?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  lastLoginAt      DateTime?
+  settings         UserSettings?
+  investigations   Investigation[]
+  auditLogs        AuditLog[]
+  sessions         Session[]
+  devices          Device[]
+  locationSessions LocationSession[]
+  consentRecords   ConsentRecord[]
+  enrollmentTokens EnrollmentToken[]
+  permissions      PermissionRecord[]
+  cameraSessions   CameraSession[]
+  cameraCaptureRequests CameraCaptureRequest[]
+  cameraFrames     CameraFrame[]
+  securityEvents   SecurityEvent[]
+  monitoring       MonitoringState?
+
+  @@index([role])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([mobile])
+}
+
+model UserSettings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  retentionDays       Int      @default(90)
+  autoPurge           Boolean  @default(false)
+  consentAcknowledged Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  tokenHash    String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  revokedAt    DateTime?
+  userAgent    String?
+  ip           String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Investigation {
+  id           String              @id @default(cuid())
+  userId       String
+  inputType    InputType
+  input        String
+  normalized   String
+  status       InvestigationStatus @default(PENDING)
+  confidence   Float?
+  summary      Json?
+  results      Json?
+  error        String?
+  createdAt    DateTime            @default(now())
+  completedAt  DateTime?
+  expiresAt    DateTime?
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditLogs    AuditLog[]
+
+  @@index([userId])
+  @@index([inputType])
+  @@index([createdAt])
+}
+
+model ProviderState {
+  name      String   @id
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id             String         @id @default(cuid())
+  userId         String?
+  investigationId String?
+  action         String
+  details        Json?
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime       @default(now())
+  user           User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  investigation  Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+/// A device explicitly enrolled by its owner. Location sharing only ever
+/// happens for devices whose owner started an active, consented session.
+model Device {
+  id                  String             @id @default(cuid())
+  ownerId             String
+  name                String
+  /// Mobile number used to deliver the pairing invite (optional).
+  phone               String?
+  platform            DevicePlatform     @default(WEB)
+  /// Detected browser + OS reported by the mobile client at enrollment time.
+  browser             String?
+  os                  String?
+  /// Single-use enrollment token that created this device (if enrolled via a link).
+  enrollmentTokenId   String?            @unique
+  enrollmentToken     EnrollmentToken?   @relation("EnrollmentTokenDevice", fields: [enrollmentTokenId], references: [id], onDelete: SetNull)
+  /// Denormalized connection state: ONLINE | OFFLINE | LOCATION_ON | LOCATION_OFF | PERMISSION_DENIED | PERMISSION_REVOKED.
+  status              String             @default("OFFLINE")
+  /// Whether a live location-sharing session is active for this device.
+  locationSharing     Boolean            @default(false)
+  /// GRANTED | DENIED | REVOKED | UNKNOWN — reflects the OS location permission.
+  permissionStatus    String             @default("UNKNOWN")
+  /// Marked true when the device was enrolled for development test (simulated coords).
+  isTestDevice        Boolean            @default(false)
+  /// sha256 of the device token used to authenticate the mobile client.
+  deviceTokenHash     String             @unique
+  lastSeenAt          DateTime?
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  owner               User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  locationEvents      LocationEvent[]
+  locationSessions    LocationSession[]
+  consentRecords      ConsentRecord[]
+
+  @@index([ownerId])
+  @@index([lastSeenAt])
+}
+
+/// A location-sharing session. Exactly one ACTIVE session may exist per device.
+model LocationSession {
+  id         String                @id @default(cuid())
+  deviceId   String
+  userId     String
+  status     LocationSessionStatus @default(ACTIVE)
+  /// NORMAL | HIGH_ACCURACY | BATTERY_SAVING
+  mode       String                @default("NORMAL")
+  intervalMs Int                   @default(15000)
+  startedAt  DateTime              @default(now())
+  stoppedAt  DateTime?
+  device     Device                @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, status])
+  @@index([userId, status])
+}
+
+/// Explicit, revocable consent granted by the device owner before sharing.
+/// The SQL table keeps the legacy name `LocationConsent` so existing data and
+/// migrations are preserved.
+model ConsentRecord {
+  id                 String    @id @default(cuid())
+  userId             String
+  deviceId           String
+  consentVersion     String    @default("1.0")
+  /// Whether the owner granted the OS/browser location permission.
+  locationPermission Boolean   @default(true)
+  grantedAt          DateTime  @map("startedAt") @default(now())
+  revokedAt          DateTime? @map("stoppedAt")
+  device             Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("LocationConsent")
+  @@index([deviceId])
+  @@index([userId])
+}
+
+/// A single-use, time-limited enrollment link token. Only its SHA-256 hash is
+/// stored; the plaintext value is returned once to embed in the invite URL.
+model EnrollmentToken {
+  id         String          @id @default(cuid())
+  userId     String
+  tokenHash  String          @unique
+  /// Short human-readable purpose shown on the enrollment page.
+  purpose    String          @default("Device enrollment")
+  deviceName String?
+  platform   DevicePlatform?
+  phone      String?
+  expiresAt  DateTime
+  usedAt     DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime        @default(now())
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     Device?         @relation("EnrollmentTokenDevice")
+
+  @@index([userId])
+}
+
+/// One verified GPS fix delivered by the enrolled device's OS location API.
+model LocationEvent {
+  id        String   @id @default(cuid())
+  deviceId  String
+  latitude  Float
+  longitude Float
+  /// Horizontal accuracy in meters as reported by the OS.
+  accuracy  Float
+  altitude  Float?
+  speed     Float?
+  heading   Float?
+  /// Wall-clock time the OS captured the fix.
+  timestamp DateTime
+  /// True when this fix was generated by a DEVELOPMENT TEST DEVICE. Test fixes
+  /// are never presented as real GPS data.
+  isTest    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, timestamp])
+  @@index([timestamp])
+}
+
+/// One row per (user, permission type). Reflects the *state the user reports*
+/// about their browser/OS permission plus the app-side consent workflow.
+model PermissionRecord {
+  id                   String          @id @default(cuid())
+  userId               String
+  type                 PermissionType
+  state                PermissionState @default(NOT_REQUESTED)
+  /// App-side consent version accepted when the permission was granted.
+  consentVersion       String          @default("1.0")
+  /// Privacy-policy version shown when the permission was requested/granted.
+  privacyPolicyVersion String          @default("1.0")
+  requestedAt          DateTime?
+  grantedAt            DateTime?
+  deniedAt             DateTime?
+  /// Browser/OS metadata captured at the time of the request.
+  browser              String?
+  os                   String?
+  deviceMeta           Json?
+  ip                   String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@index([type])
+  @@index([state])
+  @@index([grantedAt])
+}
+
+/// A user-initiated, explicitly enabled camera session. The backend only ever
+/// records application-level session state; it never activates a camera.
+model CameraSession {
+  id        String             @id @default(cuid())
+  userId    String
+  status    CameraSessionStatus @default(ACTIVE)
+  /// CAPTURE | LIVE — how the user chose to use the camera.
+  mode      String             @default("CAPTURE")
+  startedAt DateTime           @default(now())
+  endedAt   DateTime?
+  /// Who ended the session: USER | ADMIN.
+  endedBy   String?
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+/// An ADMIN-initiated remote camera capture request targeted at a user's
+/// browser. The actual frame is only ever taken by the user's own browser via
+/// `getUserMedia` using the previously-granted browser camera permission.
+model CameraCaptureRequest {
+  id          String      @id @default(cuid())
+  userId      String
+  /// The admin account that requested the capture.
+  actorId     String?
+  /// PENDING | COMPLETED | DENIED | FAILED | TIMEOUT
+  status      String      @default("PENDING")
+  requestedAt DateTime    @default(now())
+  completedAt DateTime?
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  frame       CameraFrame?
+
+  @@index([userId])
+  @@index([status])
+  @@index([requestedAt])
+}
+
+/// A frame delivered by the user's browser in response to an admin capture
+/// request. The image is stored as a base64 data URL for simplicity.
+model CameraFrame {
+  id         String              @id @default(cuid())
+  requestId  String              @unique
+  userId     String
+  mimeType   String              @default("image/jpeg")
+  width      Int                 @default(640)
+  height     Int                 @default(480)
+  image      String
+  capturedAt DateTime            @default(now())
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  request    CameraCaptureRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([capturedAt])
+}
+
+/// Append-only security event log (login failures, revoked sessions, forced
+/// logouts, monitoring state changes, etc.).
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  type      String
+  severity  String   @default("INFO")
+  message   String
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+/// Application-side monitoring state per user. ADMIN controls this; it never
+/// overrides browser/OS permission controls.
+model MonitoringState {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  /// INACTIVE | ACTIVE | SUSPENDED
+  status    String    @default("INACTIVE")
+  startedAt DateTime?
+  stoppedAt DateTime?
+  updatedBy String?
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

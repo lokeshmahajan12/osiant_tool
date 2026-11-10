@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-950 text-slate-200 font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-accent-dim text-white;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-ink-700 bg-ink-900/80 backdrop-blur-sm;
+  }
+  .panel-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-ink-950 hover:bg-accent-soft;
+  }
+  .btn-ghost {
+    @apply btn border border-ink-700 bg-ink-850 text-slate-300 hover:border-accent-dim hover:text-accent-soft;
+  }
+  .btn-danger {
+    @apply btn border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20;
+  }
+  .input {
+    @apply w-full rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 transition focus:border-accent-dim focus:outline-none focus:ring-1 focus:ring-accent-dim;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    @apply rounded bg-ink-700;
+  }
+}
+
+@media print {
+  body {
+    @apply bg-white text-black;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    color: #0f172a;
+  }
+}
